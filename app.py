@@ -48,6 +48,101 @@ st.markdown("""
     .custom-table thead tr:last-child th {
         border-top: none;
     }
+
+    /* 督导分析专用样式 */
+    .metric-card {
+        background-color: #ffffff;
+        border: 1px solid #eef0f4;
+        border-radius: 8px;
+        padding: 14px 18px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+    }
+    .metric-title {
+        font-size: 13px;
+        color: #666;
+        margin-bottom: 4px;
+    }
+    .metric-value {
+        font-size: 24px;
+        font-weight: 700;
+        color: #1f1f1f;
+    }
+
+    .sup-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 13px;
+        margin-top: 12px;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .sup-table th {
+        background-color: #1e3d59;
+        color: #ffffff;
+        font-weight: 600;
+        text-align: center;
+        padding: 11px 14px;
+        border: 1px solid #173046;
+    }
+    .sup-table td {
+        padding: 10px 12px;
+        text-align: center;
+        border: 1px solid #e8e8e8;
+        color: #333333;
+        vertical-align: middle;
+    }
+    .sup-table tr:hover {
+        background-color: #f5f9ff;
+    }
+    /* 后10名标红预警行样式 */
+    .sup-warning-row {
+        background-color: #fff1f0 !important;
+    }
+    .sup-warning-row td {
+        border-color: #ffccc7 !important;
+    }
+    .sup-warning-row:hover {
+        background-color: #ffe6e6 !important;
+    }
+    .badge-warning {
+        background-color: #ff4d4f;
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 3px 10px;
+        border-radius: 12px;
+        display: inline-block;
+        box-shadow: 0 1px 2px rgba(255, 77, 79, 0.2);
+    }
+    .badge-normal {
+        background-color: #e6f7ff;
+        color: #1890ff;
+        font-size: 12px;
+        font-weight: 600;
+        padding: 3px 10px;
+        border-radius: 12px;
+        display: inline-block;
+    }
+    .badge-rank1 {
+        background-color: #fffbe6;
+        color: #d48806;
+        font-size: 12px;
+        font-weight: 700;
+        padding: 3px 8px;
+        border-radius: 12px;
+        border: 1px solid #ffe58f;
+        display: inline-block;
+    }
+    .gap-neg {
+        color: #cf1322;
+        font-weight: 700;
+    }
+    .gap-pos {
+        color: #389e0d;
+        font-weight: 700;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -132,7 +227,46 @@ def parse_excel_stream(excel_bytes):
     if '是否活跃' in df_store.columns:
         df_store['是否活跃'] = df_store['是否活跃'].replace({'/': '不活跃', '-': '不活跃'}).fillna('不活跃')
 
-    # 百分比格式化函数，保留整数
+    # 向下填充汇总表的 地区 和 业务 字段
+    if '地区' in df_summary.columns and '业务' in df_summary.columns:
+        df_summary['地区'] = df_summary['地区'].ffill()
+        summary_mask = df_summary['地区'].astype(str).str.contains('计', na=False)
+        df_summary['业务'] = df_summary['业务'].ffill().where(~summary_mask, "")
+        if '所属督导' in df_summary.columns:
+            df_summary['所属督导'] = df_summary['所属督导'].fillna("")
+
+    # --- 构造督导分析专属数据表 (在汇总表进行文本格式化之前提取纯数值) ---
+    df_sup_clean = df_summary[~df_summary['所属督导'].isna() & (df_summary['所属督导'].astype(str).str.strip() != '')].copy()
+    df_sup_clean = df_sup_clean[~df_sup_clean['所属督导'].astype(str).str.contains('计|总|合')].copy()
+
+    # 计算各督导管辖门店的客资缺口总额
+    df_store_for_gap = df_store.copy()
+    if '缺口' in df_store_for_gap.columns and '所属督导' in df_store_for_gap.columns:
+        df_store_for_gap['缺口_数值'] = pd.to_numeric(df_store_for_gap['缺口'], errors='coerce').fillna(0)
+        gap_dict = df_store_for_gap.groupby('所属督导')['缺口_数值'].sum().to_dict()
+    else:
+        gap_dict = {}
+
+    df_supervisor = pd.DataFrame()
+    df_supervisor['所属督导'] = df_sup_clean['所属督导']
+    df_supervisor['地区'] = df_sup_clean['地区']
+    df_supervisor['业务'] = df_sup_clean['业务']
+    df_supervisor['门店数量'] = pd.to_numeric(df_sup_clean['门店数量（SAB）'], errors='coerce').fillna(0).astype(int)
+    df_supervisor['活跃数量'] = pd.to_numeric(df_sup_clean['活跃数量'], errors='coerce').fillna(0).astype(int)
+    df_supervisor['活跃率_数值'] = pd.to_numeric(df_sup_clean['活跃门店占比'], errors='coerce').fillna(0)
+    df_supervisor['客资缺口总额'] = df_supervisor['所属督导'].map(gap_dict).fillna(0).astype(int)
+
+    # 排序：活跃率降序，门店数量降序
+    df_supervisor = df_supervisor.sort_values(by=['活跃率_数值', '门店数量'], ascending=[False, False]).reset_index(drop=True)
+    df_supervisor['排名'] = range(1, len(df_supervisor) + 1)
+    
+    # 标记后10名预警 (倒数10名)
+    total_sups = len(df_supervisor)
+    bottom_10_start = max(1, total_sups - 9)
+    df_supervisor['是否后10名预警'] = df_supervisor['排名'] >= bottom_10_start
+    df_supervisor['活跃率'] = df_supervisor['活跃率_数值'].apply(lambda x: f"{x*100:.0f}%")
+
+    # --- 汇总表文本格式化 (供Tab 1渲染) ---
     def format_pct(x):
         if pd.isna(x) or str(x).strip() in ["", "-", "nan", "none", "None", "NULL", "null"]:
             return ""
@@ -141,7 +275,6 @@ def parse_excel_stream(excel_bytes):
         except (ValueError, TypeError):
             return x
 
-    # 整数格式化函数（确保门店数量和活跃数量不保留一位小数）
     def format_int(x):
         if pd.isna(x) or str(x).strip() in ["", "-", "nan", "none", "None", "NULL", "null"]:
             return ""
@@ -150,22 +283,13 @@ def parse_excel_stream(excel_bytes):
         except (ValueError, TypeError):
             return x
 
-    # 向下填充汇总表的 地区 和 业务 字段，以便生成 MultiIndex 从而实现行合并居中
-    if '地区' in df_summary.columns and '业务' in df_summary.columns:
-        df_summary['地区'] = df_summary['地区'].ffill()
-        summary_mask = df_summary['地区'].astype(str).str.contains('计', na=False)
-        df_summary['业务'] = df_summary['业务'].ffill().where(~summary_mask, "")
-        if '所属督导' in df_summary.columns:
-            df_summary['所属督导'] = df_summary['所属督导'].fillna("")
-
-    # 汇总层面：格式化占比与数量（数量显示为纯整数）
     for col in df_summary.columns:
         if '占比' in col or '同比' in col:
             df_summary[col] = df_summary[col].apply(format_pct)
         elif any(kw in col for kw in ['数量', '店数', '户数']):
             df_summary[col] = df_summary[col].apply(format_int)
 
-    return df_summary, df_store
+    return df_summary, df_store, df_supervisor
 
 @st.cache_data(ttl=180)
 def load_data():
@@ -214,13 +338,13 @@ def main():
     st.markdown("---")
 
     try:
-        (df_summary, df_store), source_label = load_data()
+        (df_summary, df_store, df_supervisor), source_label = load_data()
     except Exception as e:
         st.error(f"读取数据失败: {e}")
         return
 
-    # 选项卡和表头名称完全与原始表格的 Sheet 名称保持一致
-    tab1, tab2 = st.tabs(["📊 汇总", "🏪 门店分析"])
+    # 3个 Tab 页面
+    tab1, tab2, tab3 = st.tabs(["📊 汇总", "🏪 门店分析", "👨‍💼 督导分析"])
 
     with tab1:
         st.subheader("汇总")
@@ -234,24 +358,20 @@ def main():
             
         html_table = df_summary_disp.to_html(classes="custom-table", escape=False, sparsify=True)
         
-        # 修复 pandas to_html 默认生成的多行交错表头（这会导致页面显示错位/乱码）
-        import re
+        # 修复 pandas to_html 默认生成的多行交错表头
         thead_html = "<thead><tr>"
         colgroup_html = "<colgroup>"
         for i, col in enumerate(df_summary.columns):
-            # 将第一列（地区）的宽度调小固定
             if i == 0:
                 colgroup_html += "<col style='width: 80px;'>"
             else:
                 colgroup_html += "<col>"
                 
-            # 仅在显示阶段去除 .1, .2 等后缀，不影响底层数据结构
             clean_col = re.sub(r'\.\d+$', '', str(col))
             thead_html += f"<th>{clean_col}</th>"
         thead_html += "</tr></thead>"
         colgroup_html += "</colgroup>"
         
-        # 将构造好的 colgroup 和 规整表头 替换掉原来的 <thead>
         html_table = re.sub(r'<thead>.*?</thead>', colgroup_html + thead_html, html_table, flags=re.DOTALL)
         
         # 合并“总计”或“合计”所在行的空白 <th> 单元格
@@ -267,7 +387,6 @@ def main():
         total_cols = len(df_summary.columns)
         def merge_note(match):
             inner_text = match.group(1)
-            # 将字面量的 \n 或换行符替换为 HTML 的 <br>，字号调整得更小更精致，文字靠左对齐
             formatted_text = inner_text.replace('\\n', '<br>').replace('\n', '<br>')
             return f'<tr><td colspan="{total_cols}" style="text-align: left !important; font-size: 11px; color: #666; padding: 8px 12px; line-height: 1.6;">{formatted_text}</td></tr>'
             
@@ -285,7 +404,7 @@ def main():
         
         selected_filters = {}
         for i, col_name in enumerate(available_filters):
-            # 取唯一值，并剔除无效选项（如 0, -, 空白等）
+            # 取唯一值，并剔除无效选项
             raw_vals = df_store[col_name].dropna().unique()
             unique_vals = []
             for v in raw_vals:
@@ -316,10 +435,130 @@ def main():
         st.markdown(f"**当前筛选结果:** 共查询到 `{len(filtered_df)}` 家门店")
         
         # 使用 column_config 在界面显示时去除表头后缀 (如 .1 等)
-        import re
         col_cfg = {c: st.column_config.Column(label=re.sub(r'\.\d+$', '', str(c))) for c in filtered_df.columns}
         st.dataframe(filtered_df, use_container_width=True, hide_index=True, column_config=col_cfg)
 
+    with tab3:
+        st.subheader("督导分析 (活跃率排名 & 后10名标红预警)")
+
+        # 统计卡片指标
+        total_sup_count = len(df_supervisor)
+        warning_sup_count = df_supervisor['是否后10名预警'].sum()
+        avg_active_rate = df_supervisor['活跃率_数值'].mean()
+        warn_df = df_supervisor[df_supervisor['是否后10名预警']]
+        warn_total_gap = warn_df['客资缺口总额'].sum()
+
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        with m_col1:
+            st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-title">督导总人数</div>
+                    <div class="metric-value">{total_sup_count} 人</div>
+                </div>
+            """, unsafe_allow_html=True)
+        with m_col2:
+            st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-title">⚠️ 后10名预警人数</div>
+                    <div class="metric-value" style="color: #cf1322;">{warning_sup_count} 人</div>
+                </div>
+            """, unsafe_allow_html=True)
+        with m_col3:
+            st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-title">督导平均活跃率</div>
+                    <div class="metric-value">{avg_active_rate*100:.1f}%</div>
+                </div>
+            """, unsafe_allow_html=True)
+        with m_col4:
+            st.markdown(f"""
+                <div class="metric-card">
+                    <div class="metric-title">预警督导客资缺口总额</div>
+                    <div class="metric-value" style="color: #cf1322;">{warn_total_gap:,}</div>
+                </div>
+            """, unsafe_allow_html=True)
+
+        st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+        # 筛选模式
+        filter_mode = st.radio(
+            "查看范围:",
+            options=["全部督导排名 (23人)", "⚠️ 仅看后10名预警督导 (10人)"],
+            horizontal=True
+        )
+
+        disp_sup = df_supervisor.copy()
+        if "仅看后10名" in filter_mode:
+            disp_sup = disp_sup[disp_sup['是否后10名预警']].copy()
+
+        # 生成督导分析的 HTML 响应式表格
+        sup_html = """
+        <table class="sup-table">
+            <thead>
+                <tr>
+                    <th style="width: 80px;">排名</th>
+                    <th style="width: 100px;">所属督导</th>
+                    <th style="width: 110px;">地区</th>
+                    <th style="width: 100px;">业务</th>
+                    <th style="width: 90px;">门店数量</th>
+                    <th style="width: 90px;">活跃数量</th>
+                    <th style="width: 100px;">活跃率</th>
+                    <th style="width: 120px;">客资缺口总额</th>
+                    <th style="width: 140px;">预警状态</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+
+        for _, row in disp_sup.iterrows():
+            is_warn = row['是否后10名预警']
+            row_class = "sup-warning-row" if is_warn else ""
+            
+            rank = row['排名']
+            if rank == 1:
+                rank_badge = '<span class="badge-rank1">🥇 第1名</span>'
+            elif rank == 2:
+                rank_badge = '<span class="badge-rank1" style="background:#f0f5ff; border-color:#d6e4ff; color:#1d39c4;">🥈 第2名</span>'
+            elif rank == 3:
+                rank_badge = '<span class="badge-rank1" style="background:#fff2e8; border-color:#ffd8bf; color:#d4380d;">🥉 第3名</span>'
+            else:
+                rank_badge = f"第 {rank} 名"
+
+            gap = row['客资缺口总额']
+            if gap < 0:
+                gap_html = f'<span class="gap-neg">{gap:,}</span>'
+            elif gap > 0:
+                gap_html = f'<span class="gap-pos">+{gap:,}</span>'
+            else:
+                gap_html = '<span>0</span>'
+
+            if is_warn:
+                status_badge = '<span class="badge-warning">⚠️ 预警（后10名）</span>'
+            else:
+                status_badge = '<span class="badge-normal">正常达标</span>'
+
+            sup_html += f"""
+                <tr class="{row_class}">
+                    <td>{rank_badge}</td>
+                    <td><strong>{row['所属督导']}</strong></td>
+                    <td>{row['地区']}</td>
+                    <td>{row['业务']}</td>
+                    <td>{row['门店数量']}</td>
+                    <td>{row['活跃数量']}</td>
+                    <td><strong style="color: {'#cf1322' if is_warn else '#1f1f1f'};">{row['活跃率']}</strong></td>
+                    <td>{gap_html}</td>
+                    <td>{status_badge}</td>
+                </tr>
+            """
+
+        sup_html += """
+            </tbody>
+        </table>
+        """
+
+        st.markdown(sup_html, unsafe_allow_html=True)
+
 if __name__ == "__main__":
     main()
+
 
