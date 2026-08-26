@@ -444,42 +444,19 @@ def main():
     with tab3:
         st.subheader("督导分析 (活跃率排名 & 后10名标红预警)")
 
-        # 统计卡片指标
+        # 统计卡片指标（去掉预警人数，保留3个核心指标）
         total_sup_count = len(df_supervisor)
-        warning_sup_count = df_supervisor['是否后10名预警'].sum()
         avg_active_rate = df_supervisor['活跃率_数值'].mean()
         warn_df = df_supervisor[df_supervisor['是否后10名预警']]
         warn_total_gap = warn_df['客资缺口总额'].sum()
 
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1, m_col2, m_col3 = st.columns(3)
         with m_col1:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">督导总人数</div>
-                    <div class="metric-value">{total_sup_count} 人</div>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="metric-card"><div class="metric-title">督导总人数</div><div class="metric-value">{total_sup_count} 人</div></div>""", unsafe_allow_html=True)
         with m_col2:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">⚠️ 后10名预警人数</div>
-                    <div class="metric-value" style="color: #cf1322;">{warning_sup_count} 人</div>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="metric-card"><div class="metric-title">督导平均活跃率</div><div class="metric-value">{avg_active_rate*100:.1f}%</div></div>""", unsafe_allow_html=True)
         with m_col3:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">督导平均活跃率</div>
-                    <div class="metric-value">{avg_active_rate*100:.1f}%</div>
-                </div>
-            """, unsafe_allow_html=True)
-        with m_col4:
-            st.markdown(f"""
-                <div class="metric-card">
-                    <div class="metric-title">预警督导客资缺口总额</div>
-                    <div class="metric-value" style="color: #cf1322;">{warn_total_gap:,}</div>
-                </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="metric-card"><div class="metric-title">预警督导客资缺口总额</div><div class="metric-value" style="color: #cf1322;">{warn_total_gap:,}</div></div>""", unsafe_allow_html=True)
 
         st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
@@ -494,24 +471,18 @@ def main():
         if "仅看后10名" in filter_mode:
             disp_sup = disp_sup[disp_sup['是否后10名预警']].copy()
 
-        # 生成督导分析的 HTML 响应式表格
-        sup_html = """
-        <table class="sup-table">
-            <thead>
-                <tr>
-                    <th style="width: 80px;">排名</th>
-                    <th style="width: 100px;">所属督导</th>
-                    <th style="width: 110px;">地区</th>
-                    <th style="width: 100px;">业务</th>
-                    <th style="width: 90px;">门店数量</th>
-                    <th style="width: 90px;">活跃数量</th>
-                    <th style="width: 100px;">活跃率</th>
-                    <th style="width: 120px;">客资缺口总额</th>
-                    <th style="width: 140px;">预警状态</th>
-                </tr>
-            </thead>
-            <tbody>
-        """
+        # 生成督导分析的 HTML 表格（确保无缩进以防被识别为代码块）
+        sup_html = '<table class="sup-table"><thead><tr>'
+        sup_html += '<th style="width: 80px;">排名</th>'
+        sup_html += '<th style="width: 100px;">所属督导</th>'
+        sup_html += '<th style="width: 110px;">地区</th>'
+        sup_html += '<th style="width: 100px;">业务</th>'
+        sup_html += '<th style="width: 90px;">门店数量</th>'
+        sup_html += '<th style="width: 90px;">活跃数量</th>'
+        sup_html += '<th style="width: 100px;">活跃率</th>'
+        sup_html += '<th style="width: 120px;">客资缺口总额</th>'
+        sup_html += '<th style="width: 140px;">预警状态</th>'
+        sup_html += '</tr></thead><tbody>'
 
         for _, row in disp_sup.iterrows():
             is_warn = row['是否后10名预警']
@@ -540,24 +511,10 @@ def main():
             else:
                 status_badge = '<span class="badge-normal">正常达标</span>'
 
-            sup_html += f"""
-                <tr class="{row_class}">
-                    <td>{rank_badge}</td>
-                    <td><strong>{row['所属督导']}</strong></td>
-                    <td>{row['地区']}</td>
-                    <td>{row['业务']}</td>
-                    <td>{row['门店数量']}</td>
-                    <td>{row['活跃数量']}</td>
-                    <td><strong style="color: {'#cf1322' if is_warn else '#1f1f1f'};">{row['活跃率']}</strong></td>
-                    <td>{gap_html}</td>
-                    <td>{status_badge}</td>
-                </tr>
-            """
+            color_style = "color: #cf1322;" if is_warn else "color: #1f1f1f;"
+            sup_html += f'<tr class="{row_class}"><td>{rank_badge}</td><td><strong>{row["所属督导"]}</strong></td><td>{row["地区"]}</td><td>{row["业务"]}</td><td>{row["门店数量"]}</td><td>{row["活跃数量"]}</td><td><strong style="{color_style}">{row["活跃率"]}</strong></td><td>{gap_html}</td><td>{status_badge}</td></tr>'
 
-        sup_html += """
-            </tbody>
-        </table>
-        """
+        sup_html += '</tbody></table>'
 
         st.markdown(sup_html, unsafe_allow_html=True)
 
