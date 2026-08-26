@@ -66,21 +66,53 @@ def get_data_file_path():
             return p
     return candidate_paths[0]
 
-def parse_excel_stream(excel_bytes):
-    import openpyxl
-    import io
+def extract_hidden_rows_fast(excel_bytes):
+    import zipfile
+    import xml.etree.ElementTree as ET
     
-    wb = openpyxl.load_workbook(excel_bytes, data_only=True)
-    ws_summary = wb['汇总']
-    ws_store = wb['门店分析']
-    hidden_summary_rows = [r for r, dim in ws_summary.row_dimensions.items() if dim.hidden]
-    hidden_store_rows = [r for r, dim in ws_store.row_dimensions.items() if dim.hidden]
-    wb.close()
+    hidden_summary = []
+    hidden_store = []
+    try:
+        with zipfile.ZipFile(excel_bytes, 'r') as z:
+            wb_xml = z.read('xl/workbook.xml')
+            root_wb = ET.fromstring(wb_xml)
+            namespaces = {'main': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+            
+            rels_xml = z.read('xl/_rels/workbook.xml.rels')
+            root_rels = ET.fromstring(rels_xml)
+            rel_ns = {'pkg': 'http://schemas.openxmlformats.org/package/2006/relationships'}
+            rel_map = {r.attrib['Id']: r.attrib['Target'] for r in root_rels.findall('pkg:Relationship', rel_ns)}
+            
+            sheet_files = {}
+            for sheet in root_wb.findall('.//main:sheet', namespaces):
+                name = sheet.attrib.get('name')
+                rId = sheet.attrib.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id')
+                target = rel_map.get(rId)
+                if name and target:
+                    sheet_files[name] = 'xl/' + target if not target.startswith('xl/') else target
+
+            if '汇总' in sheet_files:
+                root_sheet = ET.fromstring(z.read(sheet_files['汇总']))
+                for row in root_sheet.findall('.//main:row', namespaces):
+                    if row.attrib.get('hidden') == '1':
+                        hidden_summary.append(int(row.attrib['r']))
+                        
+            if '门店分析' in sheet_files:
+                root_sheet = ET.fromstring(z.read(sheet_files['门店分析']))
+                for row in root_sheet.findall('.//main:row', namespaces):
+                    if row.attrib.get('hidden') == '1':
+                        hidden_store.append(int(row.attrib['r']))
+    except Exception:
+        pass
+    return hidden_summary, hidden_store
+
+def parse_excel_stream(excel_bytes):
+    hidden_summary_rows, hidden_store_rows = extract_hidden_rows_fast(excel_bytes)
 
     excel_bytes.seek(0)
-    df_summary = pd.read_excel(excel_bytes, sheet_name='汇总', header=1)
-    excel_bytes.seek(0)
-    df_store = pd.read_excel(excel_bytes, sheet_name='门店分析', header=1)
+    with pd.ExcelFile(excel_bytes, engine='openpyxl') as ef:
+        df_summary = pd.read_excel(ef, sheet_name='汇总', header=1)
+        df_store = pd.read_excel(ef, sheet_name='门店分析', header=1)
     
     # 提取用户在截图中所呈现的 21 列 (索引 0~18, 24, 68)
     keep_indices = list(range(0, 19)) + [24, 68]
@@ -140,7 +172,7 @@ def parse_excel_stream(excel_bytes):
 
     return df_summary, df_store
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=180)
 def load_data():
     import requests
     import io
@@ -151,15 +183,17 @@ def load_data():
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        resp = requests.get(api_url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            download_url = data.get("download_url")
-            if download_url:
-                excel_resp = requests.get(download_url, headers=headers, timeout=30)
-                if excel_resp.status_code == 200:
-                    excel_bytes = io.BytesIO(excel_resp.content)
-                    return parse_excel_stream(excel_bytes), "在线金山文档"
+        with requests.Session() as s:
+            s.trust_env = False
+            resp = s.get(api_url, headers=headers, timeout=8)
+            if resp.status_code == 200:
+                data = resp.json()
+                download_url = data.get("download_url")
+                if download_url:
+                    excel_resp = s.get(download_url, headers=headers, timeout=20)
+                    if excel_resp.status_code == 200:
+                        excel_bytes = io.BytesIO(excel_resp.content)
+                        return parse_excel_stream(excel_bytes), "在线金山文档"
     except Exception:
         pass
 
