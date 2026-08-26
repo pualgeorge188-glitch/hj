@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import os
+import re
+import io
+import requests
 
 # 页面基本配置
 st.set_page_config(page_title="数据看板", page_icon="📈", layout="wide")
