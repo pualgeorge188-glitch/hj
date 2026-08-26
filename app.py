@@ -51,13 +51,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# 数据源候选路径（支持桌面及腾讯文档同步目录）
+# 金山文档 (WPS) 在线分享 ID
+WPS_FILE_ID = "cavvuRYktATy"
+
+# 数据源候选路径（本地兜底）
 def get_data_file_path():
     candidate_paths = [
         r"C:\Users\18501\Desktop\SA旗舰店及双高体验馆&生活馆.xlsx",
         os.path.expanduser(r"~\Desktop\SA旗舰店及双高体验馆&生活馆.xlsx"),
-        os.path.expanduser(r"~\Documents\腾讯文档\SA旗舰店及双高体验馆&生活馆.xlsx"),
-        os.path.expanduser(r"~\Documents\TencentDocs\SA旗舰店及双高体验馆&生活馆.xlsx"),
         os.path.join(os.path.dirname(__file__), "SA旗舰店及双高体验馆&生活馆.xlsx")
     ]
     for p in candidate_paths:
@@ -65,23 +66,21 @@ def get_data_file_path():
             return p
     return candidate_paths[0]
 
-FILE_PATH = get_data_file_path()
-
-@st.cache_data
-def load_data(file_path, modified_time):
-    # 使用 openpyxl 读取隐藏的行（即 Excel 中的筛选/折叠状态）
+def parse_excel_stream(excel_bytes):
     import openpyxl
-    import re
-    wb = openpyxl.load_workbook(file_path, data_only=True)
+    import io
     
+    wb = openpyxl.load_workbook(excel_bytes, data_only=True)
     ws_summary = wb['汇总']
     ws_store = wb['门店分析']
     hidden_summary_rows = [r for r, dim in ws_summary.row_dimensions.items() if dim.hidden]
     hidden_store_rows = [r for r, dim in ws_store.row_dimensions.items() if dim.hidden]
     wb.close()
 
-    df_summary = pd.read_excel(file_path, sheet_name='汇总', header=1)
-    df_store = pd.read_excel(file_path, sheet_name='门店分析', header=1)
+    excel_bytes.seek(0)
+    df_summary = pd.read_excel(excel_bytes, sheet_name='汇总', header=1)
+    excel_bytes.seek(0)
+    df_store = pd.read_excel(excel_bytes, sheet_name='门店分析', header=1)
     
     # 提取用户在截图中所呈现的 21 列 (索引 0~18, 24, 68)
     keep_indices = list(range(0, 19)) + [24, 68]
@@ -89,7 +88,6 @@ def load_data(file_path, modified_time):
     df_store = df_store.iloc[:, valid_indices].copy()
     
     # Excel行号是 1-based，且 header=1 意味着第1行是标题，第2行是表头，第3行是数据的第一行(对应Pandas的index 0)
-    # 因此隐藏行的 index 为 r - 3
     idx_drop_summary = [r - 3 for r in hidden_summary_rows if (r - 3) in df_summary.index]
     df_summary = df_summary.drop(index=idx_drop_summary)
     
@@ -128,7 +126,6 @@ def load_data(file_path, modified_time):
     # 向下填充汇总表的 地区 和 业务 字段，以便生成 MultiIndex 从而实现行合并居中
     if '地区' in df_summary.columns and '业务' in df_summary.columns:
         df_summary['地区'] = df_summary['地区'].ffill()
-        # 区分总计/合计行，避免向下填充业务
         summary_mask = df_summary['地区'].astype(str).str.contains('计', na=False)
         df_summary['业务'] = df_summary['业务'].ffill().where(~summary_mask, "")
         if '所属督导' in df_summary.columns:
@@ -143,19 +140,52 @@ def load_data(file_path, modified_time):
 
     return df_summary, df_store
 
+@st.cache_data(ttl=60)
+def load_data():
+    import requests
+    import io
+    
+    # 优先尝试从金山文档 (WPS) 在线实时拉取
+    try:
+        api_url = f"https://www.kdocs.cn/api/office/file/{WPS_FILE_ID}/download"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        resp = requests.get(api_url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            download_url = data.get("download_url")
+            if download_url:
+                excel_resp = requests.get(download_url, headers=headers, timeout=30)
+                if excel_resp.status_code == 200:
+                    excel_bytes = io.BytesIO(excel_resp.content)
+                    return parse_excel_stream(excel_bytes), "在线金山文档"
+    except Exception:
+        pass
+
+    # 若无法连接网络则读取本地文件兜底
+    local_path = get_data_file_path()
+    if os.path.exists(local_path):
+        import io
+        with open(local_path, "rb") as f:
+            return parse_excel_stream(io.BytesIO(f.read())), "本地备份文件"
+
+    raise RuntimeError("无法从金山文档或本地找到数据源文件。")
+
 def main():
-    st.title("📈 黑吉SAB旗舰店（含双高）Q3商机管理客资活跃情况")
+    col_t1, col_t2 = st.columns([4, 1])
+    with col_t1:
+        st.title("📈 黑吉SAB旗舰店（含双高）Q3商机管理客资活跃情况")
+    with col_t2:
+        st.write("")
+        if st.button("🔄 同步金山文档最新数据", use_container_width=True):
+            st.cache_data.clear()
+            st.rerun()
+
     st.markdown("---")
 
-    file_path = get_data_file_path()
-    if not os.path.exists(file_path):
-        st.error(f"找不到数据源文件，请确保文件存放在: {file_path}")
-        return
-
-    mtime = os.path.getmtime(file_path)
-    
     try:
-        df_summary, df_store = load_data(file_path, mtime)
+        (df_summary, df_store), source_label = load_data()
     except Exception as e:
         st.error(f"读取数据失败: {e}")
         return
