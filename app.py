@@ -444,19 +444,15 @@ def main():
     with tab3:
         st.subheader("督导分析 (活跃率排名 & 后10名标红预警)")
 
-        # 统计卡片指标（去掉预警人数，保留3个核心指标）
+        # 统计卡片指标（保留督导总人数与平均活跃率）
         total_sup_count = len(df_supervisor)
         avg_active_rate = df_supervisor['活跃率_数值'].mean()
-        warn_df = df_supervisor[df_supervisor['是否后10名预警']]
-        warn_total_gap = warn_df['客资缺口总额'].sum()
 
-        m_col1, m_col2, m_col3 = st.columns(3)
+        m_col1, m_col2 = st.columns(2)
         with m_col1:
             st.markdown(f"""<div class="metric-card"><div class="metric-title">督导总人数</div><div class="metric-value">{total_sup_count} 人</div></div>""", unsafe_allow_html=True)
         with m_col2:
             st.markdown(f"""<div class="metric-card"><div class="metric-title">督导平均活跃率</div><div class="metric-value">{avg_active_rate*100:.1f}%</div></div>""", unsafe_allow_html=True)
-        with m_col3:
-            st.markdown(f"""<div class="metric-card"><div class="metric-title">预警督导客资缺口总额</div><div class="metric-value" style="color: #cf1322;">{warn_total_gap:,}</div></div>""", unsafe_allow_html=True)
 
         st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
@@ -471,17 +467,15 @@ def main():
         if "仅看后10名" in filter_mode:
             disp_sup = disp_sup[disp_sup['是否后10名预警']].copy()
 
-        # 生成督导分析的 HTML 表格（确保无缩进以防被识别为代码块）
+        # 生成督导分析的 HTML 表格（去除预警状态列与缺口总额列）
         sup_html = '<table class="sup-table"><thead><tr>'
-        sup_html += '<th style="width: 80px;">排名</th>'
-        sup_html += '<th style="width: 100px;">所属督导</th>'
-        sup_html += '<th style="width: 110px;">地区</th>'
-        sup_html += '<th style="width: 100px;">业务</th>'
-        sup_html += '<th style="width: 90px;">门店数量</th>'
-        sup_html += '<th style="width: 90px;">活跃数量</th>'
-        sup_html += '<th style="width: 100px;">活跃率</th>'
-        sup_html += '<th style="width: 120px;">客资缺口总额</th>'
-        sup_html += '<th style="width: 140px;">预警状态</th>'
+        sup_html += '<th style="width: 100px;">排名</th>'
+        sup_html += '<th style="width: 130px;">所属督导</th>'
+        sup_html += '<th style="width: 140px;">地区</th>'
+        sup_html += '<th style="width: 130px;">业务</th>'
+        sup_html += '<th style="width: 110px;">门店数量</th>'
+        sup_html += '<th style="width: 110px;">活跃数量</th>'
+        sup_html += '<th style="width: 120px;">活跃率</th>'
         sup_html += '</tr></thead><tbody>'
 
         for _, row in disp_sup.iterrows():
@@ -498,21 +492,8 @@ def main():
             else:
                 rank_badge = f"第 {rank} 名"
 
-            gap = row['客资缺口总额']
-            if gap < 0:
-                gap_html = f'<span class="gap-neg">{gap:,}</span>'
-            elif gap > 0:
-                gap_html = f'<span class="gap-pos">+{gap:,}</span>'
-            else:
-                gap_html = '<span>0</span>'
-
-            if is_warn:
-                status_badge = '<span class="badge-warning">⚠️ 预警（后10名）</span>'
-            else:
-                status_badge = '<span class="badge-normal">正常达标</span>'
-
             color_style = "color: #cf1322;" if is_warn else "color: #1f1f1f;"
-            sup_html += f'<tr class="{row_class}"><td>{rank_badge}</td><td><strong>{row["所属督导"]}</strong></td><td>{row["地区"]}</td><td>{row["业务"]}</td><td>{row["门店数量"]}</td><td>{row["活跃数量"]}</td><td><strong style="{color_style}">{row["活跃率"]}</strong></td><td>{gap_html}</td><td>{status_badge}</td></tr>'
+            sup_html += f'<tr class="{row_class}"><td>{rank_badge}</td><td><strong>{row["所属督导"]}</strong></td><td>{row["地区"]}</td><td>{row["业务"]}</td><td>{row["门店数量"]}</td><td>{row["活跃数量"]}</td><td><strong style="{color_style}">{row["活跃率"]}</strong></td></tr>'
 
         sup_html += '</tbody></table>'
 
