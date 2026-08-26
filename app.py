@@ -283,7 +283,7 @@ def main():
     with tab2:
         st.subheader("门店分析 (条件筛选)")
         
-        filter_cols = ['所属区域', '门店最新等级', '是否需要跟进', '是否活跃']
+        filter_cols = ['所属区域', '最新冻结等级', '门店最新等级', '是否需要跟进', '是否活跃']
         available_filters = [c for c in filter_cols if c in df_store.columns]
         
         cols = st.columns(len(available_filters) if available_filters else 1)
@@ -304,7 +304,7 @@ def main():
                 unique_vals = [x for x in ['活跃', '不活跃'] if x in unique_vals] or unique_vals
             elif col_name == '是否需要跟进':
                 unique_vals = [x for x in ['需要', '不需要'] if x in unique_vals] or unique_vals
-            elif col_name == '门店最新等级':
+            elif col_name in ['门店最新等级', '最新冻结等级']:
                 order = ['S', 'A', 'B', 'C', 'D']
                 unique_vals = sorted(unique_vals, key=lambda x: order.index(x) if x in order else 99)
             
