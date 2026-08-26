@@ -299,14 +299,14 @@ def main():
                     if s_val not in unique_vals:
                         unique_vals.append(s_val)
             
-            # 对各选项进行人性化排序
+            # 对各选项进行人性化排序并确保固定档位完整
             if col_name == '是否活跃':
-                unique_vals = [x for x in ['活跃', '不活跃'] if x in unique_vals] or unique_vals
+                unique_vals = ['活跃', '不活跃']
             elif col_name == '是否需要跟进':
-                unique_vals = [x for x in ['需要', '不需要'] if x in unique_vals] or unique_vals
+                unique_vals = ['需要', '不需要']
             elif col_name in ['门店最新等级', '最新冻结等级']:
                 order = ['S', 'A', 'B', 'C', 'D']
-                unique_vals = sorted(unique_vals, key=lambda x: order.index(x) if x in order else 99)
+                unique_vals = order + [x for x in unique_vals if x not in order]
             
             with cols[i]:
                 selected = st.selectbox(f"筛选: {col_name}", options=["全部"] + unique_vals)
