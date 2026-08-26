@@ -121,9 +121,12 @@ def parse_excel_stream(excel_bytes):
     df_summary = df_summary.loc[:, ~df_summary.columns.str.contains('^Unnamed')].dropna(how='all')
     df_store = df_store.loc[:, ~df_store.columns.str.contains('^Unnamed')].dropna(subset=['门店编码'])
     
-    # 门店分析层面：只保留所属运中为黑吉的门店（共344家，含S/A/B/C/D全部等级）
+    # 门店分析层面：只保留所属运中为黑吉，且门店类型非专卖店（旗舰店、星级生活馆、智感体验馆共146家，含S/A/B/C/D全部等级）
     if '门店所属运中' in df_store.columns:
         df_store = df_store[df_store['门店所属运中'].astype(str).str.strip() == '黑吉'].copy()
+        
+    if '门店类型' in df_store.columns:
+        df_store = df_store[df_store['门店类型'].astype(str).str.strip() != '专卖店'].copy()
 
     # 规范化“是否活跃”列，将“/”或空值统一表示为“不活跃”
     if '是否活跃' in df_store.columns:
