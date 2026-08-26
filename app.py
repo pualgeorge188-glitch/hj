@@ -107,8 +107,6 @@ def extract_hidden_rows_fast(excel_bytes):
     return hidden_summary, hidden_store
 
 def parse_excel_stream(excel_bytes):
-    hidden_summary_rows, hidden_store_rows = extract_hidden_rows_fast(excel_bytes)
-
     excel_bytes.seek(0)
     with pd.ExcelFile(excel_bytes, engine='openpyxl') as ef:
         df_summary = pd.read_excel(ef, sheet_name='汇总', header=1)
@@ -119,17 +117,11 @@ def parse_excel_stream(excel_bytes):
     valid_indices = [i for i in keep_indices if i < len(df_store.columns)]
     df_store = df_store.iloc[:, valid_indices].copy()
     
-    # Excel行号是 1-based，且 header=1 意味着第1行是标题，第2行是表头，第3行是数据的第一行(对应Pandas的index 0)
-    idx_drop_summary = [r - 3 for r in hidden_summary_rows if (r - 3) in df_summary.index]
-    df_summary = df_summary.drop(index=idx_drop_summary)
+    # 清理Unnamed列与空行
+    df_summary = df_summary.loc[:, ~df_summary.columns.str.contains('^Unnamed')].dropna(how='all')
+    df_store = df_store.loc[:, ~df_store.columns.str.contains('^Unnamed')].dropna(subset=['门店编码'])
     
-    idx_drop_store = [r - 3 for r in hidden_store_rows if (r - 3) in df_store.index]
-    df_store = df_store.drop(index=idx_drop_store)
-    
-    # 清理Unnamed列
-    df_summary = df_summary.loc[:, ~df_summary.columns.str.contains('^Unnamed')]
-    
-    # 门店分析层面：只保留所属运中为黑吉的门店
+    # 门店分析层面：只保留所属运中为黑吉的门店（共344家，含S/A/B/C/D全部等级）
     if '门店所属运中' in df_store.columns:
         df_store = df_store[df_store['门店所属运中'].astype(str).str.strip() == '黑吉'].copy()
 
