@@ -328,7 +328,48 @@ def load_data():
 
     raise RuntimeError("无法从金山文档或本地找到数据源文件。")
 
+def render_login_gate():
+    # 状态管理：初始化访客姓名
+    if "user_name" not in st.session_state:
+        st.session_state.user_name = ""
+
+    # 前置拦截：姓名为空时仅显示登录验证卡片，并使用 st.stop() 拦截后续逻辑
+    if not st.session_state.user_name:
+        _, col_center, _ = st.columns([1, 1.6, 1])
+        with col_center:
+            st.markdown("<div style='height: 80px;'></div>", unsafe_allow_html=True)
+            with st.container(border=True):
+                st.markdown("<h3 style='text-align: center; margin-bottom: 8px; color: #1e3d59;'>🔒 访问验证</h3>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center; color: #666; font-size: 14px; margin-bottom: 24px;'>请输入您的姓名以进入黑吉SAB数据看板</p>", unsafe_allow_html=True)
+                
+                with st.form("auth_form", clear_on_submit=False):
+                    name_input = st.text_input("请输入姓名", placeholder="例如：张三", label_visibility="collapsed")
+                    submit_btn = st.form_submit_button("进入看板 ➔", use_container_width=True)
+                    
+                    if submit_btn:
+                        cleaned_name = name_input.strip()
+                        if not cleaned_name:
+                            st.error("姓名不能为空，请输入有效姓名")
+                        else:
+                            st.session_state.user_name = cleaned_name
+                            st.rerun()
+        st.stop()
+
 def main():
+    # 执行访问验证拦截
+    render_login_gate()
+
+    # 解锁后顶部常驻用户信息栏
+    col_u1, col_u2 = st.columns([5, 1.2])
+    with col_u1:
+        st.markdown(f"<div style='font-size: 15px; font-weight: 500; color: #444; padding-top: 6px;'>👋 欢迎您，<strong style='color: #1e3d59; font-size: 16px;'>{st.session_state.user_name}</strong>！</div>", unsafe_allow_html=True)
+    with col_u2:
+        if st.button("🚪 更换姓名 / 退出", use_container_width=True):
+            st.session_state.user_name = ""
+            st.rerun()
+
+    st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+
     col_t1, col_t2 = st.columns([4, 1])
     with col_t1:
         st.title("📈 黑吉SAB旗舰店（含双高）Q3商机管理客资活跃情况")
